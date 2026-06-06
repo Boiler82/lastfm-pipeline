@@ -15,6 +15,21 @@ flattened as (
         value:chart_position::integer as chart_position
     from source,
     lateral flatten(input => raw_data:tracks.track)
+),
+
+deduped as (
+    select *,
+        ROW_NUMBER() OVER (
+            PARTITION BY track_name, DATE(loaded_at)
+            ORDER BY loaded_at
+        ) as row_num
+    from flattened
 )
 
-select * from flattened
+select 
+    loaded_at,
+    track_name,
+    artist_name,
+    chart_position
+from deduped
+where row_num = 1

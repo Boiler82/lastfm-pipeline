@@ -1,6 +1,7 @@
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.standard.operators.bash import BashOperator
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 from datetime import datetime, timedelta
 import requests
 import json
@@ -56,9 +57,27 @@ with DAG(
         python_callable=fetch_and_upload
     )
 
+    copy_into_snowflake = SQLExecuteQueryOperator(
+    task_id='copy_into_snowflake',
+    conn_id='snowflake_default',
+    sql="""
+        COPY INTO LASTFM.RAW.TOP_TRACKS (RAW_DATA, LOADED_AT)
+        FROM (
+            SELECT 
+                $1,
+                TO_TIMESTAMP(
+                    SUBSTR(SPLIT_PART(METADATA$FILENAME, '/', -1), 19, 16),
+                    'YYYY-MM-DDTHH-MI'
+                )
+            FROM @LASTFM.RAW.AZURE_STAGE
+        )
+        FILE_FORMAT = (TYPE = 'JSON');
+    """
+)
+
     run_dbt = BashOperator(
         task_id='run_dbt_models',
         bash_command='dbt run --project-dir /usr/local/airflow/dags/../lastfm_dbt --profiles-dir /usr/local/airflow/dags/../lastfm_dbt'
     )
 
-    fetch_upload >> run_dbt
+    fetch_upload >> copy_into_snowflake >> run_dbt
