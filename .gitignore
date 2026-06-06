@@ -20,3 +20,5 @@ venv/
 
 #data
 data/
+
+.env

@@ -1,0 +1,13 @@
+lastfm_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: AGMCJMS-BK44273
+      user: FABIOB82
+      password: xastEdAKptUgV2A
+      role: ACCOUNTADMIN
+      database: LASTFM
+      warehouse: TRANSFORMING
+      schema: DEV
+      threads: 1
