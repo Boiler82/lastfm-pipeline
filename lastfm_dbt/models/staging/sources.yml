@@ -6,3 +6,27 @@ sources:
     schema: RAW
     tables:
       - name: top_tracks
+        description: "Raw Last.fm top 50 tracks data ingested daily via the Last.fm API"
+        data_tests:
+          - unique:
+              column_name: "track_name || loaded_at"
+        columns:
+          - name: track_name
+            description: "Name of the track"
+            tests:
+              - not_null
+          - name: artist_name
+            description: "Name of the artist"
+            tests:
+              - not_null
+          - name: chart_position
+            description: "Position of the track in the Last.fm top 50 chart"
+            tests:
+              - not_null
+          - name: loaded_at
+            description: "Timestamp when the record was loaded into Snowflake"
+            tests:
+              - not_null
+
+    
+          
