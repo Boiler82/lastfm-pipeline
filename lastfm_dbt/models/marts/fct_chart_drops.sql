@@ -28,6 +28,7 @@ drops as (
     from with_previous
     where previous_position is not null
     and chart_position - previous_position > 0
+    and loaded_at >= DATEADD(day, -2, CURRENT_DATE)
 )
 
 select * from drops
