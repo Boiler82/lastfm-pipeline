@@ -25,3 +25,4 @@ data/
 .astro/config.yaml.lock
 airflow_settings.yaml
 .user.yml
+data/
