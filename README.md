@@ -1,123 +1,138 @@
-# Batch Ingestion Demo
+# Last.fm Chart Drops Pipeline
 
-Two short Python scripts that pull JSON from a public API and save it to
-disk. That's batch ingestion. Everything else (Fivetran, ADF, Airflow)
-is a more sophisticated version of this same idea.
+A batch data pipeline that tracks the Last.fm global Top 50 and answers one question:
 
-The repo has two examples, each demonstrating a different pattern:
+> **Which tracks dropped the most positions in the last two days?**
 
-- **`citibike.py`** — open public API, no auth, **per-minute snapshots**
-- **`fingrid.py`** — authenticated API, **daily idempotent files** with backfill
+Built as the final project for the Data Engineering course of the Data Analyst programme at Hyper Island.
 
-Each script is under 30 lines.
+---
 
-## Setup
+## What it does
+
+Each run pulls the current Last.fm global Top 50, stores the raw JSON, loads it into a warehouse, and compares every track's position against its previous appearance. The tracks that fell furthest surface in the final table.
+
+**Sample result** — on the submission date, the biggest faller was *Dreams (2004 Remaster)* by Fleetwood Mac, down 7 positions.
+
+<!-- Add a dashboard screenshot here: -->
+<!-- ![Looker Studio dashboard](docs/dashboard.png) -->
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[Last.fm API] --> B[Python<br/>lastfm.py]
+    B --> C[Azure Blob Storage<br/>raw JSON]
+    C --> D[Snowflake<br/>RAW.TOP_TRACKS]
+    D --> E[dbt<br/>staging + marts]
+    E --> F[Looker Studio]
+    G[Airflow DAG] -.orchestrates.-> B
+    G -.-> C
+    G -.-> E
+```
+
+The Airflow DAG (`dags/lastfm_pipeline.py`) runs three sequential tasks: fetch and upload to Azure, `COPY INTO` Snowflake, then `dbt run`.
+
+### dbt models
+
+| Model | Type | What it does |
+|---|---|---|
+| `stg_top_tracks` | view | Flattens the nested API JSON with `LATERAL FLATTEN`; deduplicates with `ROW_NUMBER()` partitioned by track and date |
+| `fct_chart_drops` | table | Uses `LAG()` to compare each track's position against its previous appearance, filtered to the last two days |
+
+---
+
+## Tech stack
+
+- **Ingestion:** Python, Last.fm API
+- **Storage:** Azure Blob Storage
+- **Warehouse:** Snowflake
+- **Transformation:** dbt (Core + Cloud)
+- **Orchestration:** Apache Airflow via Astro CLI + Docker
+- **Visualisation:** Looker Studio
+
+---
+
+## Repo structure
+
+```
+.
+├── dags/
+│   └── lastfm_pipeline.py          # Airflow DAG — fetch, load, transform
+├── lastfm.py                       # Last.fm API client and Azure upload
+├── lastfm_dbt/
+│   ├── models/
+│   │   ├── staging/
+│   │   │   ├── sources.yml
+│   │   │   └── stg_top_tracks.sql
+│   │   └── marts/
+│   │       └── fct_chart_drops.sql
+│   └── dbt_project.yml
+├── Dockerfile                      # Astro runtime image
+├── requirements.txt
+└── .env.example                    # Required environment variables
+```
+
+---
+
+## Running it locally
+
+Requires Docker Desktop, the [Astro CLI](https://www.astronomer.io/docs/astro/cli/install-cli), and accounts for Last.fm, Azure and Snowflake.
 
 ```bash
-uv sync
+# 1. Clone
+git clone https://github.com/Boiler82/lastfm-pipeline.git
+cd lastfm-pipeline
+
+# 2. Set your environment variables
+cp .env.example .env
+# then fill in your own values
 ```
 
-That installs Python and `requests` from `pyproject.toml`. One dependency.
+`.env` holds two variables:
 
-(If you don't use uv: `pip install requests` works too — Python 3.10+.)
+| Variable | Where to get it |
+|---|---|
+| `LASTFM_API_KEY` | [last.fm/api/account/create](https://www.last.fm/api/account/create) |
+| `AZURE_CONNECTION_STRING` | Azure Portal → Storage account → Access keys |
 
-## Run citibike.py
+Snowflake credentials are **not** in `.env` — dbt reads them from `~/.dbt/profiles.yml`, outside this repo. See the [dbt Snowflake setup docs](https://docs.getdbt.com/docs/core/connect-data-platform/snowflake-setup).
 
 ```bash
-uv run citibike.py
+# 3. Start Airflow
+astro dev start
+
+# 4. Trigger the DAG at localhost:8080
 ```
 
-You should see:
+---
 
-```
-Saved data/citibike_2026-05-09T14-37.json
-```
+## What I learned
 
-Look in `data/`. There's a JSON file there now — ~2400 NYC Citibike
-stations, each with how many bikes are docked, empty slots, station ID,
-and timestamps.
+**Deduplication belongs upstream.** Repeated `COPY INTO ... FORCE = TRUE` loads produced duplicate rows. Instead of patching the final table, I fixed it in the staging model with `ROW_NUMBER()` — so every downstream model inherits clean data.
 
-### Run it again
+**Filenames can carry metadata.** Reloading historical files overwrote the load timestamps. Parsing the timestamp back out of the blob filename with `SUBSTR(SPLIT_PART(METADATA$FILENAME, '/', -1), 19, 16)` preserved the real chart dates.
 
-If you ran it within the same minute, the file got *overwritten* — same
-filename, new contents. If a minute passed, you got a *new* file
-alongside the old one.
+**Credential hygiene is a process, not a one-off.** I committed config files containing secrets partway through the project. Recovering meant rewriting history and rotating every credential on both Azure and Snowflake. `.env` now goes into `.gitignore` before the first commit of anything I start.
 
-That's because the filename uses minute-level granularity. Citibike
-updates every ~10 seconds, so a new snapshot every minute is meaningful.
+---
 
-## Run fingrid.py (authenticated example)
+## Next steps
 
-This one needs an API key. Register at [data.fingrid.fi](https://data.fingrid.fi)
-(free), then:
+- [ ] Move orchestration off local Docker to GitHub Actions or Astro Cloud
+- [ ] Add dbt tests with business-logic assertions, not just `not_null` and `unique`
+- [ ] Add dbt source freshness checks
+- [ ] Extend beyond chart drops — biggest climbers, longest-charting tracks, artist-level trends
 
-```bash
-export FINGRID_API_KEY=your_key_here
-uv run fingrid.py
-```
+---
 
-You should see:
+## Credits
 
-```
-Saved data/fingrid_2026-05-02.json
-```
+Built on the batch ingestion template from the Hyper Island Data Engineering course ([abrahamzetz/hyper-island-batch-ingestion](https://github.com/abrahamzetz/hyper-island-batch-ingestion)). The Last.fm ingestion, dbt models and Airflow DAG are my own work.
 
-Two things to notice in the script:
+---
 
-1. **The auth header.** Fingrid wants the key in an `x-api-key` header,
-   passed via `requests.get(..., headers=...)`. Different APIs use
-   different header names (`Authorization: Bearer ...`, `x-api-key`, ...)
-   — read the docs for whichever API you're hitting.
-2. **The filename uses a date, not a timestamp.** Fingrid 358 is hourly
-   data published in batches — so each run produces one file per day.
-   Re-running with the same `DAYS_AGO` overwrites the same file. That's
-   **idempotency**: safe to retry, deterministic output.
-
-### Backfill
-
-Want yesterday? `DAYS_AGO = 1`. Want last week? Run with `DAYS_AGO = 1`,
-then `2`, then `3`, etc. The filename derives from the day being fetched,
-not from when you ran the script — so you can backfill a year and the
-files land on the right dates.
-
-This is how every real backfill works under the hood.
-
-## Two patterns, one idea
-
-| | `citibike.py` | `fingrid.py` |
-| --- | --- | --- |
-| Auth | none | `x-api-key` header |
-| Source updates | every ~10 seconds | hourly, with publication lag |
-| Filename | per-minute timestamp | per-day date |
-| Re-running | snapshots accumulate | idempotent overwrite |
-| Backfill | n/a | change `DAYS_AGO` |
-
-Both scripts do the same shape of work — `GET → JSON → file` — but the
-filename strategy is what makes them safe to schedule.
-
-## Things to try
-
-1. **Run `citibike.py` 5 times in a row.** How many files do you have?
-2. **Wait 2 minutes, run it again.** How many now?
-3. **Disconnect from wifi, run `citibike.py`.** What error do you get?
-   Where in the script does the error come from?
-4. **Read each script.** Both are under 30 lines. Find the line that
-   parses JSON, the line that creates the folder, the line that authenticates.
-5. **Run `fingrid.py` with `DAYS_AGO = 0`.** Does it return any data?
-   Why or why not? (Hint: publication lag.)
-6. **Look at the `pagination` block** in any `fingrid_*.json`. Is
-   `nextPage` `null`? If yes, you got everything. If not, the script
-   silently truncated — real ingestion would loop until `nextPage` is
-   gone.
-
-## What these scripts don't do (yet)
-
-- **No state.** They don't remember the last time they ran. Every run
-  pulls everything in the requested window.
-- **No retries.** If the API is briefly down, the script crashes. Real
-  ingestion code retries with backoff.
-- **No pagination loop.** `fingrid.py` requests `pageSize=20000` and
-  hopes the response fits. Real ingestion follows `nextPage` until done.
-- **No deduplication beyond filenames.** Real ingestion writes to
-  durable storage with primary keys.
-- **No schedule.** The scripts run when *you* run them.
+Built by Fabio Boila, data analyst student at Hyper Island, Stockholm.
+[LinkedIn](https://www.linkedin.com/in/fabioboila)
