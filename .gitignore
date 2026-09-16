@@ -22,3 +22,6 @@ venv/
 data/
 
 .env
+.astro/config.yaml.lock
+airflow_settings.yaml
+.user.yml
