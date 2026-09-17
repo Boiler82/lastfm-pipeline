@@ -14,8 +14,7 @@ Each run pulls the current Last.fm global Top 50, stores the raw JSON, loads it 
 
 **Sample result** — on the submission date, the biggest faller was *Dreams (2004 Remaster)* by Fleetwood Mac, down 7 positions.
 
-<!-- Add a dashboard screenshot here: -->
-<!-- ![Looker Studio dashboard](docs/dashboard.png) -->
+![Chart drops dashboard — Looker Studio](docs/dashboard.png)
 
 ---
 
