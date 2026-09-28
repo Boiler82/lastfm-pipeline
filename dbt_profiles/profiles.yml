@@ -1,0 +1,20 @@
+# dbt connection profile for GitHub Actions (and local runs).
+# It contains NO secrets: every sensitive value is read from an environment
+# variable with env_var(). That is why this file can safely be committed,
+# unlike lastfm_dbt/profiles.yml (which stays in .gitignore).
+#
+# Used with:  dbt build --project-dir lastfm_dbt --profiles-dir dbt_profiles
+
+lastfm_dbt:            # must match `profile:` in lastfm_dbt/dbt_project.yml
+  target: prod
+  outputs:
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"   # key-pair auth, no password
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'LASTFM_PIPELINE_ROLE') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'LASTFM_WH') }}"
+      database: LASTFM
+      schema: STAGING   # default schema; models set their own (STAGING / MARTS) in dbt_project.yml
+      threads: 4

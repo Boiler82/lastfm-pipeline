@@ -1,0 +1,67 @@
+name: Last.fm pipeline
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # every day at 06:17 UTC (08:17 in Stockholm in summer)
+  workflow_dispatch:       # adds a "Run workflow" button in the Actions tab
+
+# Never run two pipelines at the same time
+concurrency:
+  group: lastfm-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # Secrets come from Settings -> Secrets and variables -> Actions
+      LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      # Not secret: names of objects created in snowflake_setup.sql
+      SNOWFLAKE_ROLE: LASTFM_PIPELINE_ROLE
+      SNOWFLAKE_WAREHOUSE: LASTFM_WH
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-pipeline.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-pipeline.txt
+
+      - name: Write the Snowflake private key to a file
+        # The key goes into the runner's temp folder (outside the repo) and is
+        # deleted with the machine when the job ends. $GITHUB_ENV makes the path
+        # available to the next steps.
+        env:
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/rsa_key.p8"
+          printf '%s\n' "$SNOWFLAKE_PRIVATE_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "SNOWFLAKE_PRIVATE_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: "Extract + Load: Last.fm API -> stage -> RAW.TOP_TRACKS"
+        run: python load_to_snowflake.py
+
+      - name: "Transform + Test: dbt build"
+        # build = run every model + run every test, in dependency order
+        run: dbt build --project-dir lastfm_dbt --profiles-dir dbt_profiles
+
+      - name: Keep the raw JSON as a downloadable artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lastfm-raw-${{ github.run_id }}
+          path: data/*.json
+          retention-days: 30
+          if-no-files-found: ignore

@@ -1,0 +1,7 @@
+# Packages for the GitHub Actions pipeline (load_to_snowflake.py + dbt).
+# requirements.txt is kept for the original Airflow/Astro Docker setup.
+requests>=2.32
+python-dotenv>=1.0
+snowflake-connector-python>=3.12,<5
+dbt-core~=1.10
+dbt-snowflake~=1.10

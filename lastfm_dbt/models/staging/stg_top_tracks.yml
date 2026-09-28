@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: stg_top_tracks
+    description: "One row per track per day, flattened from the raw JSON and deduplicated"
+    data_tests:
+      # The dedup keeps one row per track per day, so this pair must be unique
+      - unique:
+          column_name: "track_name || '|' || to_varchar(date(loaded_at))"
+    columns:
+      - name: track_name
+        description: "Name of the track"
+        data_tests:
+          - not_null
+      - name: artist_name
+        description: "Name of the artist"
+        data_tests:
+          - not_null
+      - name: chart_position
+        description: "Position of the track in the Last.fm top 50 chart"
+        data_tests:
+          - not_null
+      - name: loaded_at
+        description: "Timestamp of the API call"
+        data_tests:
+          - not_null
