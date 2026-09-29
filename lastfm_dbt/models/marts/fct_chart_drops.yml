@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: fct_chart_drops
+    description: >
+      Tracks that fell in the Last.fm global Top 50 compared with their previous
+      appearance, limited to the last two days. One row per track per day it dropped.
+      Answers the project question: "Which tracks dropped the most positions in the
+      last two days?" Used by the Data Studio dashboard.
+    columns:
+      - name: loaded_at
+        description: "Timestamp of the chart snapshot in which the drop was seen"
+        data_tests:
+          - not_null
+      - name: track_name
+        description: "Name of the track"
+        data_tests:
+          - not_null
+      - name: artist_name
+        description: "Name of the artist"
+        data_tests:
+          - not_null
+      - name: previous_position
+        description: "Chart position at the track's previous appearance (1 = top)"
+        data_tests:
+          - not_null
+      - name: chart_position
+        description: "Chart position in this snapshot (1 = top)"
+        data_tests:
+          - not_null
+      - name: positions_dropped
+        description: "chart_position - previous_position. Always positive, because only drops are kept"
+        data_tests:
+          - not_null

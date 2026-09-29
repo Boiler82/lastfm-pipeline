@@ -2,6 +2,8 @@
 
 [![Last.fm pipeline](https://github.com/Boiler82/lastfm-pipeline/actions/workflows/pipeline.yml/badge.svg)](https://github.com/Boiler82/lastfm-pipeline/actions/workflows/pipeline.yml)
 
+📘 **[dbt documentation & lineage graph](https://boiler82.github.io/lastfm-pipeline/)**: models, columns and tests, rebuilt after every run.
+
 A batch data pipeline that tracks the Last.fm global Top 50 and answers one question:
 
 > **Which tracks dropped the most positions in the last two days?**
@@ -40,8 +42,9 @@ The workflow (`.github/workflows/pipeline.yml`) runs every day at 06:17 UTC and 
 1. **Extract**: call the Last.fm API and save a timestamped JSON file.
 2. **Load**: `PUT` the file into a Snowflake internal stage, then `COPY INTO` the raw table. The load timestamp is parsed from the file name, so reloaded historical files keep their real date.
 3. **Transform + test**: `dbt build` creates the models and runs every data test in dependency order. If a test fails, the run turns red.
-4. **Archive**: the raw JSON is kept as a downloadable workflow artifact for 30 days.
-5. **Visualise**: Data Studio reads `MARTS.FCT_CHART_DROPS` through a separate read-only service user (`LASTFM_REPORTING_USER`), also with key-pair auth.
+4. **Document**: `dbt docs generate` builds a documentation site with the lineage graph, published to [GitHub Pages](https://boiler82.github.io/lastfm-pipeline/) after every successful run.
+5. **Archive**: the raw JSON is kept as a downloadable workflow artifact for 30 days.
+6. **Visualise**: Data Studio reads `MARTS.FCT_CHART_DROPS` through a separate read-only service user (`LASTFM_REPORTING_USER`), also with key-pair auth.
 
 ### dbt models
 
@@ -50,7 +53,10 @@ The workflow (`.github/workflows/pipeline.yml`) runs every day at 06:17 UTC and 
 | `stg_top_tracks` | STAGING | view | Flattens the nested API JSON with `LATERAL FLATTEN`; deduplicates with `ROW_NUMBER()` partitioned by track and date |
 | `fct_chart_drops` | MARTS | table | Uses `LAG()` to compare each track's position against its previous appearance, filtered to the last two days |
 
-**Tests:** `not_null` on the raw source columns; `not_null` on track, artist, position and timestamp in the staging model; `unique` on track + date to prove the deduplication works.
+**Tests (15, run on every load):**
+- `not_null` on the raw source columns and on every column of both models
+- `unique` on track + date in the staging model, to prove the deduplication works
+- Business-logic tests (`lastfm_dbt/tests/`): every chart position is between 1 and 50, and every row in `fct_chart_drops` really is a drop (`positions_dropped > 0`)
 
 ---
 
@@ -117,7 +123,9 @@ The original DAG (`dags/lastfm_pipeline.py`) and `lastfm.py` are kept in the rep
 │   │   │   ├── stg_top_tracks.sql
 │   │   │   └── stg_top_tracks.yml  # model tests
 │   │   └── marts/
-│   │       └── fct_chart_drops.sql
+│   │       ├── fct_chart_drops.sql
+│   │       └── fct_chart_drops.yml # model docs + tests
+│   ├── tests/                      # business-logic tests (singular SQL tests)
 │   └── dbt_project.yml
 ├── requirements-pipeline.txt       # packages for the GitHub Actions run
 ├── .env.example                    # variables for running locally
@@ -191,7 +199,8 @@ python load_to_snowflake.py --backfill data
 ## Next steps
 
 - [x] Move orchestration off local Docker to GitHub Actions
-- [ ] Add dbt tests with business-logic assertions, not just `not_null` and `unique`
+- [x] Add dbt tests with business-logic assertions, not just `not_null` and `unique`
+- [x] Publish dbt docs with the lineage graph on GitHub Pages
 - [ ] Add dbt source freshness checks
 - [x] Reconnect the dashboard (now Data Studio) to the new Snowflake account with a read-only user
 - [ ] Extend beyond chart drops: biggest climbers, longest-charting tracks, artist-level trends
