@@ -14,9 +14,11 @@ Built as the final project for the Data Engineering course of the Data Analyst p
 
 Each run pulls the current Last.fm global Top 50, stores the raw JSON, loads it into a warehouse, and compares every track's position against its previous appearance. The tracks that fell furthest surface in the final table.
 
-**Sample result**: on the submission date, the biggest faller was *Dreams (2004 Remaster)* by Fleetwood Mac, down 7 positions.
+**Sample result**: on 29 September 2026, 17 tracks in the Top 50 fell compared with the day before. The biggest faller was *CRANK* by Slayyyter, from #44 to #49.
 
-![Chart drops dashboard (Looker Studio, original version)](docs/dashboard.png)
+![Chart drops dashboard in Data Studio](docs/dashboard.png)
+
+The dashboard is built in Google Data Studio (formerly Looker Studio) on top of `MARTS.FCT_CHART_DROPS`, and refreshes every 12 hours.
 
 ---
 
@@ -28,6 +30,7 @@ flowchart LR
     B -- PUT --> C[Snowflake internal stage<br/>@RAW.LASTFM_STAGE]
     C -- COPY INTO --> D[Snowflake<br/>RAW.TOP_TRACKS]
     D --> E[dbt build<br/>STAGING + MARTS + tests]
+    E --> F[Data Studio dashboard<br/>read-only user]
     G[GitHub Actions<br/>daily cron + manual run] -.orchestrates.-> B
     G -.-> E
 ```
@@ -38,6 +41,7 @@ The workflow (`.github/workflows/pipeline.yml`) runs every day at 06:17 UTC and 
 2. **Load**: `PUT` the file into a Snowflake internal stage, then `COPY INTO` the raw table. The load timestamp is parsed from the file name, so reloaded historical files keep their real date.
 3. **Transform + test**: `dbt build` creates the models and runs every data test in dependency order. If a test fails, the run turns red.
 4. **Archive**: the raw JSON is kept as a downloadable workflow artifact for 30 days.
+5. **Visualise**: Data Studio reads `MARTS.FCT_CHART_DROPS` through a separate read-only service user (`LASTFM_REPORTING_USER`), also with key-pair auth.
 
 ### dbt models
 
@@ -74,7 +78,8 @@ It worked, but only while my laptop was on, and it depended on two trial account
 | **Landing zone** | Azure Blob Storage + external stage | Snowflake internal stage | One less cloud account to maintain; the same `COPY INTO` logic works unchanged |
 | **Authentication** | Username + password | Key-pair auth for a `TYPE = SERVICE` user | Snowflake no longer allows password login for pipelines; keys can't be phished or reused |
 | **Secrets** | `.env` + `~/.dbt/profiles.yml` | GitHub Secrets, read as environment variables | Nothing sensitive in the repo; `dbt_profiles/profiles.yml` only contains `env_var()` placeholders |
-| **Permissions** | Personal admin role | Dedicated `LASTFM_PIPELINE_ROLE` | Least privilege: the pipeline can load `RAW` and build `STAGING`/`MARTS`, nothing else |
+| **Permissions** | Personal admin role | `LASTFM_PIPELINE_ROLE` (write) and `LASTFM_REPORTING_ROLE` (read-only) | Least privilege: the pipeline can load `RAW` and build `STAGING`/`MARTS`; the dashboard can only read `STAGING`/`MARTS` |
+| **Dashboard** | Looker Studio with a password login | Data Studio via a read-only service user | A BI tool should never hold write or admin rights; future grants keep access working after each dbt rebuild |
 | **dbt** | `dbt run` | `dbt build` | Tests now run on every load, not only when I remember |
 
 The original DAG (`dags/lastfm_pipeline.py`) and `lastfm.py` are kept in the repo for reference.
@@ -87,7 +92,7 @@ The original DAG (`dags/lastfm_pipeline.py`) and `lastfm.py` are kept in the rep
 - **Warehouse:** Snowflake (internal stage, key-pair auth, dedicated role and service user)
 - **Transformation & testing:** dbt Core
 - **Orchestration:** GitHub Actions (originally Apache Airflow via Astro CLI + Docker)
-- **Visualisation:** Looker Studio (original version)
+- **Visualisation:** Google Data Studio (formerly Looker Studio)
 
 ---
 
@@ -99,7 +104,8 @@ The original DAG (`dags/lastfm_pipeline.py`) and `lastfm.py` are kept in the rep
 │   └── pipeline.yml                # GitHub Actions: daily extract, load, dbt build
 ├── load_to_snowflake.py            # Last.fm API → internal stage → COPY INTO
 ├── snowflake/
-│   └── snowflake_setup.sql         # One-time setup: warehouse, schemas, stage, role, service user
+│   ├── snowflake_setup.sql         # One-time setup: warehouse, schemas, stage, pipeline role + user
+│   └── reporting_setup.sql         # Read-only role + user for the Data Studio dashboard
 ├── dbt_profiles/
 │   └── profiles.yml                # dbt connection, all values from environment variables
 ├── lastfm_dbt/
@@ -187,7 +193,7 @@ python load_to_snowflake.py --backfill data
 - [x] Move orchestration off local Docker to GitHub Actions
 - [ ] Add dbt tests with business-logic assertions, not just `not_null` and `unique`
 - [ ] Add dbt source freshness checks
-- [ ] Reconnect the Looker Studio dashboard to the new Snowflake account
+- [x] Reconnect the dashboard (now Data Studio) to the new Snowflake account with a read-only user
 - [ ] Extend beyond chart drops: biggest climbers, longest-charting tracks, artist-level trends
 
 ---
